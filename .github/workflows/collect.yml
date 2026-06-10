@@ -1,0 +1,41 @@
+name: リプライ案収集・Slack通知
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 23 * * *'  # JST 8:00
+
+jobs:
+  collect:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ライブラリのインストール
+        run: pip install -r requirements.txt
+
+      - name: Playwright Chromium のインストール
+        run: python -m playwright install chromium --with-deps
+
+      - name: cookies ファイルを作成
+        env:
+          X_COOKIES_KNZW: ${{ secrets.X_COOKIES_KNZW }}
+        run: |
+          python3 -c "
+          import os
+          with open('cookies_knzw.json', 'w', encoding='utf-8') as f:
+              f.write(os.environ['X_COOKIES_KNZW'])
+          print('cookies 作成完了')
+          "
+
+      - name: 実行
+        env:
+          CONFIG_PATH: config/knzw.yml
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        run: python collect_and_notify.py

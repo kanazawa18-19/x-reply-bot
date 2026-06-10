@@ -1,0 +1,50 @@
+name: リプライ実行
+
+on:
+  workflow_dispatch:
+    inputs:
+      tweet_url:
+        description: 'ツイートURL'
+        required: true
+        type: string
+      reply_text:
+        description: 'リプライ内容'
+        required: true
+        type: string
+
+jobs:
+  reply:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: ライブラリのインストール
+        run: pip install -r requirements.txt
+
+      - name: Playwright Chromium のインストール
+        run: python -m playwright install chromium --with-deps
+
+      - name: cookies ファイルを作成
+        env:
+          X_COOKIES_KNZW: ${{ secrets.X_COOKIES_KNZW }}
+        run: |
+          python3 -c "
+          import os
+          with open('cookies_knzw.json', 'w', encoding='utf-8') as f:
+              f.write(os.environ['X_COOKIES_KNZW'])
+          print('cookies 作成完了')
+          "
+
+      - name: リプライ実行
+        env:
+          TWEET_URL: ${{ inputs.tweet_url }}
+          REPLY_TEXT: ${{ inputs.reply_text }}
+          ACCOUNT: knzw
+          GH_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python reply.py

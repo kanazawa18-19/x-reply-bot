@@ -1,0 +1,8 @@
+anthropic
+flask
+gunicorn
+playwright
+pynacl
+httpx
+pyyaml
+slack-sdk
