@@ -1,5 +1,6 @@
 account: knzw
-slack_channel: "#x-reply-bot"
+slack_channel: "C09H52GRPSB"
+slack_thread_ts: "1781115389.842519"
 max_tweets_per_keyword: 2
 
 persona: |

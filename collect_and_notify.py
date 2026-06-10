@@ -115,7 +115,7 @@ def generate_reply(tweet: dict, persona: str) -> str:
     return message.content[0].text.strip()
 
 
-def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str) -> None:
+def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "") -> None:
     value = json.dumps({
         "tweet_url": tweet["tweet_url"],
         "reply_text": reply_text,
@@ -161,11 +161,14 @@ def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str)
         {"type": "divider"},
     ]
 
-    client.chat_postMessage(
+    kwargs: dict = dict(
         channel=channel,
         blocks=blocks,
         text=f"@{tweet['username']} へのリプライ案",
     )
+    if thread_ts:
+        kwargs["thread_ts"] = thread_ts
+    client.chat_postMessage(**kwargs)
 
 
 async def main() -> None:
@@ -181,6 +184,7 @@ async def main() -> None:
     keywords = config.get("reply_keywords", [])
     max_per_keyword = config.get("max_tweets_per_keyword", 2)
     slack_channel = config.get("slack_channel", "#x-reply-bot")
+    slack_thread_ts = config.get("slack_thread_ts", "")
     persona = config.get("persona", "")
 
     async with async_playwright() as p:
@@ -227,7 +231,7 @@ async def main() -> None:
     for tweet in unique:
         try:
             reply_text = generate_reply(tweet, persona)
-            send_to_slack(slack_client, slack_channel, tweet, reply_text)
+            send_to_slack(slack_client, slack_channel, tweet, reply_text, slack_thread_ts)
             print(f"  送信: @{tweet['username']}")
             await asyncio.sleep(1)
         except SlackApiError as e:
