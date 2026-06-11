@@ -84,31 +84,25 @@ def generate_reply(tweet: dict, persona: str) -> str:
 
     message = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=200,
+        max_tokens=100,
         messages=[{
             "role": "user",
-            "content": f"""あなたはX(Twitter)ユーザーとして自然なリプライを考えます。
+            "content": f"""あなたはX(Twitter)ユーザーとして、短いリプライを1つ考えます。
 
 あなたのペルソナ:
 {persona}
 
-以下のツイートへのリプライ案を1つ考えてください。
-
-【絶対NG】
-- アドバイス・指摘・提案（「〜するといいですよ」「〜ではないでしょうか」など）
-- 宣伝・売り込み
-- ハッシュタグ
-
-【重視すること】
-- 相手の気持ちや状況への共感・共鳴を最優先
-- 相手の言葉を受け止めて、同じ目線で寄り添う
-- 140文字以内
+【ルール】
+- 敬語で書く
+- 30〜50文字程度のシンプルな共感・共鳴のみ
+- アドバイス・指摘・提案・宣伝は一切NG
+- ハッシュタグ不要
 - リプライ文のみ出力（説明・引用符不要）
 
 【良い例】
-- 「それ本当にわかります、自分もそこに可能性感じてます」
-- 「めちゃくちゃ共感します、そういう視点大事ですよね」
-- 「わかりすぎる、自分もずっとそう思ってました」
+- 「それ、本当にわかります。同じ気持ちです。」
+- 「そうですよね。その感覚、すごく大事だと思います。」
+- 「わかります。現場にいるからこそ感じることですよね。」
 
 ツイート(@{tweet['username']}):
 {tweet['text']}"""
@@ -117,7 +111,7 @@ def generate_reply(tweet: dict, persona: str) -> str:
     return message.content[0].text.strip()
 
 
-def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "") -> None:
+def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "", mention_user: str = "") -> None:
     blocks = [
         {
             "type": "section",
@@ -140,7 +134,7 @@ def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str,
         {
             "type": "context",
             "elements": [
-                {"type": "mrkdwn", "text": "✅ で承認 → 自動リプライ実行　　✔️ がついたら実行済み"}
+                {"type": "mrkdwn", "text": f"{'<@' + mention_user + '> ' if mention_user else ''}✅ で承認 → 自動リプライ実行　　✔️ がついたら実行済み"}
             ],
         },
         {"type": "divider"},
@@ -177,6 +171,7 @@ async def main() -> None:
     max_per_keyword = config.get("max_tweets_per_keyword", 2)
     slack_channel = config.get("slack_channel", "#x-reply-bot")
     slack_thread_ts = config.get("slack_thread_ts", "")
+    slack_mention_user = config.get("slack_mention_user", "")
     persona = config.get("persona", "")
 
     async with async_playwright() as p:
@@ -227,7 +222,7 @@ async def main() -> None:
     for tweet in unique:
         try:
             reply_text = generate_reply(tweet, persona)
-            send_to_slack(slack_client, slack_channel, tweet, reply_text, slack_thread_ts)
+            send_to_slack(slack_client, slack_channel, tweet, reply_text, slack_thread_ts, slack_mention_user)
             print(f"  送信: @{tweet['username']}")
             await asyncio.sleep(1)
         except SlackApiError as e:

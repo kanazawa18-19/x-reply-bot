@@ -1,6 +1,7 @@
 account: knzw
 slack_channel: "C09H52GRPSB"
 slack_thread_ts: "1781115389.842519"
+slack_mention_user: "U03JFKXG6C8"
 max_tweets_per_keyword: 2
 
 persona: |
