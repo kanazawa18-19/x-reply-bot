@@ -1,6 +1,4 @@
 anthropic
-flask
-gunicorn
 playwright
 pynacl
 httpx

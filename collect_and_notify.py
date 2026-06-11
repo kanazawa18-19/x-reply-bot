@@ -13,6 +13,8 @@ import anthropic
 import yaml
 from playwright.async_api import async_playwright
 from slack_sdk import WebClient
+
+from reply import update_github_secret
 from slack_sdk.errors import SlackApiError
 
 
@@ -116,11 +118,6 @@ def generate_reply(tweet: dict, persona: str) -> str:
 
 
 def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "") -> None:
-    value = json.dumps({
-        "tweet_url": tweet["tweet_url"],
-        "reply_text": reply_text,
-    })
-
     blocks = [
         {
             "type": "section",
@@ -141,21 +138,9 @@ def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str,
             },
         },
         {
-            "type": "actions",
+            "type": "context",
             "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "✅ そのまま送信"},
-                    "style": "primary",
-                    "action_id": "reply_direct",
-                    "value": value,
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "✏️ 編集して送信"},
-                    "action_id": "reply_edit",
-                    "value": value,
-                },
+                {"type": "mrkdwn", "text": "✅ で承認 → 自動リプライ実行　　✔️ がついたら実行済み"}
             ],
         },
         {"type": "divider"},
@@ -165,6 +150,13 @@ def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str,
         channel=channel,
         blocks=blocks,
         text=f"@{tweet['username']} へのリプライ案",
+        metadata={
+            "event_type": "reply_candidate",
+            "event_payload": {
+                "tweet_url": tweet["tweet_url"],
+                "reply_text": reply_text,
+            },
+        },
     )
     if thread_ts:
         kwargs["thread_ts"] = thread_ts
@@ -213,7 +205,11 @@ async def main() -> None:
             except Exception as e:
                 print(f"  ERROR [{keyword}]: {e}", file=sys.stderr)
 
+        # クッキーを保存してから閉じる
+        await context.storage_state(path=str(cookies_path))
         await browser.close()
+
+    await update_github_secret(cookies_path, f"X_COOKIES_{account.upper()}")
 
     # 重複除去
     seen: set[str] = set()

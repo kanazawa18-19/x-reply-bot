@@ -1,12 +1,10 @@
-name: リプライ案収集・Slack通知
+name: リプライ実行チェック
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 23 * * *'  # JST 8:00
+  workflow_dispatch:  # cron-job.org からトリガー
 
 jobs:
-  collect:
+  execute:
     runs-on: ubuntu-22.04
 
     steps:
@@ -36,8 +34,8 @@ jobs:
       - name: 実行
         env:
           CONFIG_PATH: config/knzw.yml
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           GH_TOKEN: ${{ secrets.GH_SECRETS_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python collect_and_notify.py
+          ACCOUNT: knzw
+        run: python execute.py
