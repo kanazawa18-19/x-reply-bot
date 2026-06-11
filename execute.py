@@ -91,9 +91,19 @@ async def main() -> None:
         try:
             await post_reply(cookies_path, item["tweet_url"], item["reply_text"], account)
             mark_done(slack_client, channel, item["ts"])
+            slack_client.chat_postMessage(
+                channel=channel,
+                thread_ts=item["ts"],
+                text=f"✅ リプライ完了しました！\n{item['tweet_url']}",
+            )
             print(f"  完了: {item['tweet_url']}")
         except Exception as e:
             print(f"  ERROR [{item['tweet_url']}]: {e}", file=sys.stderr)
+            slack_client.chat_postMessage(
+                channel=channel,
+                thread_ts=item["ts"],
+                text=f"❌ リプライ失敗: {e}",
+            )
 
     await update_github_secret(cookies_path, f"X_COOKIES_{account.upper()}")
 
