@@ -57,8 +57,11 @@ async def search_tweets(page, keyword: str, max_tweets: int) -> list[dict]:
                 text_el = await article.query_selector('[data-testid="tweetText"]')
                 text = await text_el.inner_text() if text_el else ""
 
-                # 自分のアカウントや広告はスキップ
+                # 広告・返信ツイートはスキップ
                 if not text or "プロモーション" in text:
+                    continue
+                article_text = await article.inner_text()
+                if "Replying to" in article_text or "返信先" in article_text:
                     continue
 
                 tweets.append({
