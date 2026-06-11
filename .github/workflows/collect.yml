@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 23 * * *'  # JST 8:00
+    - cron: '0 3 * * *'   # JST 12:00
+    - cron: '0 9 * * *'   # JST 18:00
+    - cron: '0 12 * * *'  # JST 21:00
 
 jobs:
   collect:
