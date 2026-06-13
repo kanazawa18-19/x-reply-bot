@@ -30,9 +30,11 @@ async def search_tweets(page, keyword: str, max_tweets: int) -> list[dict]:
 
     tweets = []
     processed: set[str] = set()
+    no_new_streak = 0
 
     while len(tweets) < max_tweets:
         articles = await page.query_selector_all('article[data-testid="tweet"]')
+        prev_count = len(tweets)
 
         for article in articles:
             if len(tweets) >= max_tweets:
@@ -73,10 +75,21 @@ async def search_tweets(page, keyword: str, max_tweets: int) -> list[dict]:
             except Exception:
                 pass
 
-        await page.evaluate("window.scrollBy(0, 600)")
-        await page.wait_for_timeout(2_000)
+        if len(tweets) == prev_count:
+            no_new_streak += 1
+            if no_new_streak >= 3:
+                break
+        else:
+            no_new_streak = 0
 
         if len(tweets) >= max_tweets:
+            break
+
+        prev_h = await page.evaluate("document.documentElement.scrollHeight")
+        await page.evaluate("window.scrollBy(0, 600)")
+        await page.wait_for_timeout(2_000)
+        new_h = await page.evaluate("document.documentElement.scrollHeight")
+        if new_h == prev_h:
             break
 
     return tweets
