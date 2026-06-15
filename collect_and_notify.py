@@ -24,7 +24,7 @@ def load_config(path: str) -> dict:
 
 
 async def search_tweets(page, keyword: str, max_tweets: int) -> list[dict]:
-    url = f"https://x.com/search?q={quote(keyword)}&f=live"
+    url = f"https://x.com/search?q={quote(keyword + ' -filter:replies')}&f=live"
     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     await page.wait_for_timeout(random.randint(3_000, 5_000))
 
@@ -116,12 +116,16 @@ def generate_reply(tweet: dict, persona: str) -> str:
 - 「！」「…」などで温度感を自然に表現する
 - 無理に盛り上げない。あくまで自然に
 - リプライ文のみ出力
+- 「頑張ります」は使わない。自分が頑張るような語感になるため。代わりに「頑張りましょう」「頑張ってください」など相手に寄り添う表現を使う
 
 【良い例】
 - 「おはようございます！今日も頑張りましょう！」
 - 「おはようございます…！良い一日になりますように。」
 - 「お疲れ様でした！ゆっくり休んでください。」
 - 「お疲れ様です…！今日も一日お疲れ様でした！」
+
+【NG例】
+- 「本当にそうですね。朝から元気もらえました、頑張ります！」→「頑張ります」は自分事になるのでNG
 
 ツイート(@{tweet['username']}):
 {tweet['text']}"""
