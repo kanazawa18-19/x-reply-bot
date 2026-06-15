@@ -23,8 +23,11 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-async def search_tweets(page, keyword: str, max_tweets: int) -> list[dict]:
-    url = f"https://x.com/search?q={quote(keyword + ' -filter:replies')}&f=live"
+async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str = "") -> list[dict]:
+    q = keyword + " -filter:replies"
+    if search_filter:
+        q += " " + search_filter
+    url = f"https://x.com/search?q={quote(q)}&f=live"
     await page.goto(url, wait_until="domcontentloaded", timeout=60_000)
     await page.wait_for_timeout(random.randint(3_000, 5_000))
 
@@ -194,6 +197,7 @@ async def main() -> None:
 
     keywords = config.get("reply_keywords", [])
     max_per_keyword = config.get("max_tweets_per_keyword", 2)
+    search_filter = config.get("search_filter", "")
     slack_channel = config.get("slack_channel", "#x-reply-bot")
     slack_thread_ts = config.get("slack_thread_ts", "")
     slack_mention_user = config.get("slack_mention_user", "")
@@ -218,7 +222,7 @@ async def main() -> None:
         all_tweets: list[dict] = []
         for keyword in keywords:
             try:
-                tweets = await search_tweets(page, keyword, max_per_keyword)
+                tweets = await search_tweets(page, keyword, max_per_keyword, search_filter)
                 all_tweets.extend(tweets)
                 print(f"  [{keyword}] {len(tweets)} 件")
                 await asyncio.sleep(random.uniform(5, 10))
