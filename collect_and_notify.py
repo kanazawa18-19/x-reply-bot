@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-import anthropic
 import yaml
 from playwright.async_api import async_playwright
 from slack_sdk import WebClient
@@ -59,6 +58,12 @@ async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str 
                     u_href = await username_el.get_attribute("href")
                     username = u_href.strip("/")
 
+                display_name = username
+                name_container = await article.query_selector('[data-testid="User-Name"]')
+                if name_container:
+                    full_text = await name_container.inner_text()
+                    display_name = full_text.split("\n")[0].strip()
+
                 text_el = await article.query_selector('[data-testid="tweetText"]')
                 text = await text_el.inner_text() if text_el else ""
 
@@ -72,6 +77,7 @@ async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str 
                 tweets.append({
                     "tweet_url": f"https://x.com{href}",
                     "username": username,
+                    "display_name": display_name,
                     "text": text,
                     "keyword": keyword,
                 })
@@ -98,45 +104,43 @@ async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str 
     return tweets
 
 
+def _clean_display_name(name: str) -> str:
+    for sep in ["｜", "|", "＠", "@"]:
+        if sep in name:
+            name = name[:name.index(sep)]
+    return name.strip()
+
+
+_ACHIEVEMENT_KEYWORDS = {"X始めました", "フォロワー達成"}
+
+_GREETING_REPLIES = {
+    "おはようございます": "おはようございます！",
+    "おはよう":           "おはようございます！",
+    "おはよー":           "おはようございます！",
+    "お疲れ様でした":     "お疲れ様でした！",
+    "おつかれさまでした": "お疲れ様でした！",
+    "おつかれ":           "お疲れ様です！",
+    "こんにちは":         "こんにちは！",
+    "こんばんは":         "こんばんは！",
+    "おやすみ":           "おやすみなさい！",
+    "今日もお疲れ":       "お疲れ様です！",
+    "今日疲れた":         "お疲れ様です！",
+    "今週の振り返り":     "お疲れ様でした！",
+    "頑張った":           "お疲れ様でした！",
+    "頑張ります":         "頑張ってください！",
+    "ありがとうございました": "こちらこそありがとうございます！",
+}
+
+
 def generate_reply(tweet: dict, persona: str) -> str:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    name = _clean_display_name(tweet.get("display_name", tweet["username"]))
+    keyword = tweet["keyword"]
 
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=80,
-        messages=[{
-            "role": "user",
-            "content": f"""あなたはX(Twitter)ユーザーとして、ごく短いリプライを1つ考えます。
+    if keyword in _ACHIEVEMENT_KEYWORDS:
+        return f"{name}さん、おめでとうございます！"
 
-あなたのペルソナ:
-{persona}
-
-【ルール】
-- 敬語
-- 20〜35文字程度。1〜2文で完結
-- 自然な共感のみ。アドバイス・指摘・宣伝は一切NG
-- 絵文字・ハッシュタグ不要
-- 「！」「…」などで温度感を自然に表現する
-- 無理に盛り上げない。あくまで自然に
-- リプライ文のみ出力
-- このツイートは自分に向けられたものではない。投稿者が世界に向けて発信した言葉に、横から同調・共鳴する立場で返す
-- 「元気もらえました」「励みになります」など、ツイートが自分に向けられた前提の返し方はしない
-
-【良い例】
-- 「おはようございます！今日も頑張りましょう！」
-- 「おはようございます…！良い一日になりますように。」
-- 「お疲れ様でした！ゆっくり休んでください。」
-- 「お疲れ様です…！今日も一日お疲れ様でした！」
-
-【NG例】
-- 「本当にそうですね。朝から元気もらえました、頑張ります！」→ツイートが自分に向けられた前提になっているのでNG
-- 「素敵な言葉ですね、励みになります！」→ 同上
-
-ツイート(@{tweet['username']}):
-{tweet['text']}"""
-        }]
-    )
-    return message.content[0].text.strip()
+    greeting = _GREETING_REPLIES.get(keyword, "ありがとうございます！")
+    return f"{name}さん、{greeting}"
 
 
 def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "", mention_user: str = "") -> None:
