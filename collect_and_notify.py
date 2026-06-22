@@ -6,8 +6,11 @@ import json
 import os
 import random
 import sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote
+
+JST = timezone(timedelta(hours=9))
 
 import yaml
 from playwright.async_api import async_playwright
@@ -74,12 +77,18 @@ async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str 
                 if "Replying to" in article_text or "返信先" in article_text:
                     continue
 
+                time_el = await article.query_selector('time')
+                created_at = ""
+                if time_el:
+                    created_at = await time_el.get_attribute("datetime") or ""
+
                 tweets.append({
                     "tweet_url": f"https://x.com{href}",
                     "username": username,
                     "display_name": display_name,
                     "text": text,
                     "keyword": keyword,
+                    "created_at": created_at,
                 })
             except Exception:
                 pass
@@ -130,6 +139,79 @@ _GREETING_REPLIES = {
     "頑張った":           "お疲れ様でした！",
     "頑張ります":         "頑張りましょう！",
 }
+
+_GREETING_KEYWORDS = set(_GREETING_REPLIES.keys())
+
+# 時間帯ごとの優先キーワード（JST時刻で判定）
+_TIME_PRIORITY: dict[str, dict[str, set[str]]] = {
+    "morning": {  # 5〜10時
+        "high": {"おはようございます", "おはよう", "おはよー"},
+        "low":  {"こんにちは", "こんばんは", "おやすみ"},
+    },
+    "midday": {   # 11〜16時
+        "high": {"こんにちは", "フォロワー達成", "頑張ります", "今週の振り返り"},
+        "low":  {"おはようございます", "おはよう", "おはよー", "こんばんは", "おやすみ"},
+    },
+    "night": {    # 17〜4時
+        "high": {"こんばんは", "おやすみ", "お疲れ様でした", "おつかれさまでした",
+                 "おつかれ", "今日もお疲れ", "今日疲れた", "頑張った"},
+        "low":  {"おはようございます", "おはよう", "おはよー", "こんにちは"},
+    },
+}
+
+
+def _get_time_bucket() -> str:
+    hour = datetime.now(JST).hour
+    if 5 <= hour < 11:
+        return "morning"
+    if 11 <= hour < 17:
+        return "midday"
+    return "night"
+
+
+def _keyword_max_tweets(keyword: str, base: int) -> int:
+    bucket = _get_time_bucket()
+    priority = _TIME_PRIORITY[bucket]
+    if keyword in priority["high"]:
+        return max(base * 3, 6)
+    if keyword in priority["low"]:
+        return 0
+    return base
+
+
+def is_today_jst(created_at: str) -> bool:
+    if not created_at:
+        return True
+    try:
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return dt.astimezone(JST).date() == datetime.now(JST).date()
+    except Exception:
+        return True
+
+
+def get_replied_tweet_urls(client: WebClient, channel: str, thread_ts: str) -> set[str]:
+    replied: set[str] = set()
+    cursor = None
+    while True:
+        kwargs: dict = dict(channel=channel, ts=thread_ts, include_all_metadata=True, limit=100)
+        if cursor:
+            kwargs["cursor"] = cursor
+        try:
+            resp = client.conversations_replies(**kwargs)
+        except SlackApiError:
+            break
+        for msg in resp.get("messages", []):
+            meta = msg.get("metadata")
+            if not meta or meta.get("event_type") != "reply_candidate":
+                continue
+            reactions = {r["name"] for r in msg.get("reactions", [])}
+            if "heavy_check_mark" in reactions:
+                replied.add(meta["event_payload"]["tweet_url"])
+        if resp.get("has_more"):
+            cursor = resp["response_metadata"]["next_cursor"]
+        else:
+            break
+    return replied
 
 
 def generate_reply(tweet: dict, persona: str) -> str:
@@ -225,8 +307,12 @@ async def main() -> None:
 
         all_tweets: list[dict] = []
         for keyword in keywords:
+            kw_max = _keyword_max_tweets(keyword, max_per_keyword)
+            if kw_max == 0:
+                print(f"  [{keyword}] スキップ（時間帯外）")
+                continue
             try:
-                tweets = await search_tweets(page, keyword, max_per_keyword, search_filter)
+                tweets = await search_tweets(page, keyword, kw_max, search_filter)
                 all_tweets.extend(tweets)
                 print(f"  [{keyword}] {len(tweets)} 件")
                 await asyncio.sleep(random.uniform(5, 10))
@@ -248,11 +334,28 @@ async def main() -> None:
             seen.add(tid)
             unique.append(t)
 
-    print(f"\n合計 {len(unique)} 件 → Slack 通知")
-
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
-    for tweet in unique:
+    # 実行済みツイートを除外
+    replied_urls: set[str] = set()
+    if slack_thread_ts:
+        replied_urls = get_replied_tweet_urls(slack_client, slack_channel, slack_thread_ts)
+    unique = [t for t in unique if t["tweet_url"] not in replied_urls]
+    print(f"  実行済み除外後: {len(unique)} 件")
+
+    # 挨拶系は今日の投稿のみ
+    filtered = [
+        t for t in unique
+        if t["keyword"] not in _GREETING_KEYWORDS or is_today_jst(t["created_at"])
+    ]
+    print(f"  挨拶フィルタ後: {len(filtered)} 件")
+
+    # 投稿日時の新しい順にソート
+    filtered.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+
+    print(f"\n合計 {len(filtered)} 件 → Slack 通知")
+
+    for tweet in filtered:
         try:
             reply_text = generate_reply(tweet, persona)
             send_to_slack(slack_client, slack_channel, tweet, reply_text, slack_thread_ts, slack_mention_user)
