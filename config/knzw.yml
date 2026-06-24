@@ -3,7 +3,7 @@ slack_channel: "C09H52GRPSB"
 slack_thread_ts: "1781115389.842519"
 slack_mention_user: "U03JFKXG6C8"
 max_tweets_per_keyword: 2
-search_filter: "(経営者 OR 起業家 OR 代表 OR 社長 OR マーケ OR 営業 OR ビジネス OR 事業 OR 開発 OR エンジニア OR AI OR スタートアップ)"
+search_filter: "(経営者 OR 起業家 OR 代表 OR 社長 OR マーケ OR 営業 OR ビジネス OR 事業 OR 開発 OR エンジニア OR AI OR スタートアップ) -\"AIイラスト\" -\"AI画像\" -\"AIart\" -\"AI art\" -\"美少女\" -#AIイラスト -#AI画像 -#AIart -#美少女"
 
 persona: |
   営業本部とデザイン部を兼任し、WEBマーケやAI導入の現場を最前線で指揮する実戦型マネージャー。

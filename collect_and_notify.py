@@ -343,6 +343,17 @@ async def main() -> None:
     unique = [t for t in unique if t["tweet_url"] not in replied_urls]
     print(f"  実行済み除外後: {len(unique)} 件")
 
+    # AIイラスト・美少女系を除外（ハッシュタグ含む）
+    _EXCLUSION_TERMS = {
+        "aiイラスト", "ai画像", "aiart", "ai art", "美少女",
+        "#aiイラスト", "#ai画像", "#aiart", "#美少女",
+    }
+    unique = [
+        t for t in unique
+        if not any(term in (t.get("text", "") + t.get("display_name", "")).lower() for term in _EXCLUSION_TERMS)
+    ]
+    print(f"  除外ワードフィルタ後: {len(unique)} 件")
+
     # 挨拶系は今日の投稿のみ
     filtered = [
         t for t in unique
@@ -350,8 +361,14 @@ async def main() -> None:
     ]
     print(f"  挨拶フィルタ後: {len(filtered)} 件")
 
-    # 投稿日時の新しい順にソート
-    filtered.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+    # 営業・エンジニア職を優先、次に投稿日時の新しい順
+    _PRIORITY_TERMS = {"営業", "エンジニア", "SE", "営業職", "エンジニア職", "セールス", "sales"}
+
+    def _priority_score(t: dict) -> int:
+        haystack = t.get("text", "") + t.get("display_name", "")
+        return 1 if any(term in haystack for term in _PRIORITY_TERMS) else 0
+
+    filtered.sort(key=lambda t: (_priority_score(t), t.get("created_at", "")), reverse=True)
 
     print(f"\n合計 {len(filtered)} 件 → Slack 通知")
 
