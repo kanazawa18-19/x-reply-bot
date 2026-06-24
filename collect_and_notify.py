@@ -189,8 +189,8 @@ def is_today_jst(created_at: str) -> bool:
         return True
 
 
-def get_replied_tweet_urls(client: WebClient, channel: str, thread_ts: str) -> set[str]:
-    replied: set[str] = set()
+def get_notified_tweet_urls(client: WebClient, channel: str, thread_ts: str) -> set[str]:
+    notified: set[str] = set()
     cursor = None
     while True:
         kwargs: dict = dict(channel=channel, ts=thread_ts, include_all_metadata=True, limit=100)
@@ -204,14 +204,12 @@ def get_replied_tweet_urls(client: WebClient, channel: str, thread_ts: str) -> s
             meta = msg.get("metadata")
             if not meta or meta.get("event_type") != "reply_candidate":
                 continue
-            reactions = {r["name"] for r in msg.get("reactions", [])}
-            if "heavy_check_mark" in reactions:
-                replied.add(meta["event_payload"]["tweet_url"])
+            notified.add(meta["event_payload"]["tweet_url"])
         if resp.get("has_more"):
             cursor = resp["response_metadata"]["next_cursor"]
         else:
             break
-    return replied
+    return notified
 
 
 def generate_reply(tweet: dict, persona: str) -> str:
@@ -336,12 +334,12 @@ async def main() -> None:
 
     slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
 
-    # 実行済みツイートを除外
-    replied_urls: set[str] = set()
+    # 通知済みツイートを除外（承認済み・未承認問わず）
+    notified_urls: set[str] = set()
     if slack_thread_ts:
-        replied_urls = get_replied_tweet_urls(slack_client, slack_channel, slack_thread_ts)
-    unique = [t for t in unique if t["tweet_url"] not in replied_urls]
-    print(f"  実行済み除外後: {len(unique)} 件")
+        notified_urls = get_notified_tweet_urls(slack_client, slack_channel, slack_thread_ts)
+    unique = [t for t in unique if t["tweet_url"] not in notified_urls]
+    print(f"  通知済み除外後: {len(unique)} 件")
 
     # AIイラスト・美少女系を除外（ハッシュタグ含む）
     _EXCLUSION_TERMS = {
