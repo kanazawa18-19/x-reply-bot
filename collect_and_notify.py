@@ -16,7 +16,7 @@ import yaml
 from playwright.async_api import async_playwright
 from slack_sdk import WebClient
 
-from reply import update_github_secret
+from reply import update_github_secret, post_reply
 from slack_sdk.errors import SlackApiError
 
 
@@ -120,10 +120,7 @@ def _clean_display_name(name: str) -> str:
     return name.strip()
 
 
-_ACHIEVEMENT_KEYWORDS = {"フォロワー達成"}
-
 _GREETING_REPLIES = {
-    "X始めました":        "よろしくお願いします！",
     "おはようございます": "おはようございます！",
     "おはよう":           "おはようございます！",
     "おはよー":           "おはようございます！",
@@ -144,15 +141,15 @@ _GREETING_KEYWORDS = set(_GREETING_REPLIES.keys())
 
 # 時間帯ごとの優先キーワード（JST時刻で判定）
 _TIME_PRIORITY: dict[str, dict[str, set[str]]] = {
-    "morning": {  # 5〜10時
+    "morning": {  # 5〜12時
         "high": {"おはようございます", "おはよう", "おはよー"},
         "low":  {"こんにちは", "こんばんは", "おやすみ"},
     },
-    "midday": {   # 11〜16時
-        "high": {"こんにちは", "フォロワー達成", "頑張ります", "今週の振り返り"},
+    "midday": {   # 13〜18時
+        "high": {"こんにちは", "頑張ります", "今週の振り返り"},
         "low":  {"おはようございます", "おはよう", "おはよー", "こんばんは", "おやすみ"},
     },
-    "night": {    # 17〜4時
+    "night": {    # 19〜4時
         "high": {"こんばんは", "おやすみ", "お疲れ様でした", "おつかれさまでした",
                  "おつかれ", "今日もお疲れ", "今日疲れた", "頑張った"},
         "low":  {"おはようございます", "おはよう", "おはよー", "こんにちは"},
@@ -162,9 +159,9 @@ _TIME_PRIORITY: dict[str, dict[str, set[str]]] = {
 
 def _get_time_bucket() -> str:
     hour = datetime.now(JST).hour
-    if 5 <= hour < 11:
+    if 5 <= hour < 13:
         return "morning"
-    if 11 <= hour < 17:
+    if 13 <= hour < 19:
         return "midday"
     return "night"
 
@@ -217,12 +214,14 @@ def get_replied_tweet_urls(client: WebClient, channel: str, thread_ts: str) -> s
 def generate_reply(tweet: dict, persona: str) -> str:
     name = _clean_display_name(tweet.get("display_name", tweet["username"]))
     keyword = tweet["keyword"]
+    text = tweet.get("text", "")
 
-    if keyword in _ACHIEVEMENT_KEYWORDS:
-        return f"{name}さん、おめでとうございます！"
+    # ツイート本文から挨拶キーワードを検出して返信を決定
+    for kw, reply in _GREETING_REPLIES.items():
+        if kw in text:
+            return f"{name}さん、{reply}"
 
-    greeting = _GREETING_REPLIES.get(keyword, "ありがとうございます！")
-    return f"{name}さん、{greeting}"
+    return f"{name}さん、{_GREETING_REPLIES.get(keyword, 'ありがとうございます！')}"
 
 
 def send_to_slack(client: WebClient, channel: str, tweet: dict, reply_text: str, thread_ts: str = "", mention_user: str = "") -> None:
@@ -288,6 +287,7 @@ async def main() -> None:
     slack_thread_ts = config.get("slack_thread_ts", "")
     slack_mention_user = config.get("slack_mention_user", "")
     persona = config.get("persona", "")
+    auto_reply_users = config.get("auto_reply_users", {})
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -345,8 +345,8 @@ async def main() -> None:
 
     # AIイラスト・美少女系を除外（ハッシュタグ含む）
     _EXCLUSION_TERMS = {
-        "aiイラスト", "ai画像", "aiart", "ai art", "美少女",
-        "#aiイラスト", "#ai画像", "#aiart", "#美少女",
+        "aiイラスト", "ai画像", "aiart", "ai art", "美少女", "ai美女",
+        "#aiイラスト", "#ai画像", "#aiart", "#美少女", "#ai美女",
     }
     unique = [
         t for t in unique
@@ -354,10 +354,16 @@ async def main() -> None:
     ]
     print(f"  除外ワードフィルタ後: {len(unique)} 件")
 
-    # 挨拶系は今日の投稿のみ
+    # 挨拶系は今日の投稿のみ（キーワードまたは本文に挨拶ワードがあれば当日限定）
+    def _is_greeting(t: dict) -> bool:
+        if t["keyword"] in _GREETING_KEYWORDS:
+            return True
+        text = t.get("text", "")
+        return any(kw in text for kw in _GREETING_KEYWORDS)
+
     filtered = [
         t for t in unique
-        if t["keyword"] not in _GREETING_KEYWORDS or is_today_jst(t["created_at"])
+        if not _is_greeting(t) or is_today_jst(t["created_at"])
     ]
     print(f"  挨拶フィルタ後: {len(filtered)} 件")
 
@@ -370,9 +376,42 @@ async def main() -> None:
 
     filtered.sort(key=lambda t: (_priority_score(t), t.get("created_at", "")), reverse=True)
 
-    print(f"\n合計 {len(filtered)} 件 → Slack 通知")
+    # 自動リプライ対象と手動承認対象を分離（自動リプライは当日分のみ）
+    auto_targets = [
+        t for t in filtered
+        if t["username"] in auto_reply_users and is_today_jst(t.get("created_at", ""))
+    ]
+    manual_targets = [t for t in filtered if t["username"] not in auto_reply_users]
 
-    for tweet in filtered:
+    print(f"\n自動リプライ {len(auto_targets)} 件 / Slack通知 {len(manual_targets)} 件")
+
+    for tweet in auto_targets:
+        reply_text = auto_reply_users[tweet["username"]]
+        try:
+            await post_reply(cookies_path, tweet["tweet_url"], reply_text, account)
+            # Slackに記録（replied_urlsで二重リプライ防止に使用）
+            kwargs: dict = dict(
+                channel=slack_channel,
+                text=f"🤖 自動リプライ完了: @{tweet['username']} → {reply_text}\n{tweet['tweet_url']}",
+                metadata={
+                    "event_type": "reply_candidate",
+                    "event_payload": {
+                        "tweet_url": tweet["tweet_url"],
+                        "reply_text": reply_text,
+                    },
+                },
+            )
+            if slack_thread_ts:
+                kwargs["thread_ts"] = slack_thread_ts
+            msg = slack_client.chat_postMessage(**kwargs)
+            # ✔️ を付けて実行済みとしてマーク
+            slack_client.reactions_add(channel=slack_channel, name="heavy_check_mark", timestamp=msg["ts"])
+            print(f"  自動リプライ完了: @{tweet['username']}")
+            await asyncio.sleep(random.uniform(3, 5))
+        except Exception as e:
+            print(f"  自動リプライ ERROR [@{tweet['username']}]: {e}", file=sys.stderr)
+
+    for tweet in manual_targets:
         try:
             reply_text = generate_reply(tweet, persona)
             send_to_slack(slack_client, slack_channel, tweet, reply_text, slack_thread_ts, slack_mention_user)
