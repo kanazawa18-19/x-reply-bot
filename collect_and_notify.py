@@ -113,6 +113,27 @@ async def search_tweets(page, keyword: str, max_tweets: int, search_filter: str 
     return tweets
 
 
+_BIO_BUSINESS_TERMS = {
+    "経営者", "起業家", "代表", "社長", "マーケ", "営業", "ビジネス", "事業",
+    "開発", "エンジニア", "AI", "スタートアップ", "CEO", "COO", "CTO",
+    "フリーランス", "副業", "コンサル", "マーケティング", "セールス",
+}
+
+
+async def check_bio_is_business(page, username: str, cache: dict[str, bool]) -> bool:
+    if username in cache:
+        return cache[username]
+    try:
+        await page.goto(f"https://x.com/{username}", wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_timeout(1_500)
+        bio_el = await page.query_selector('[data-testid="UserDescription"]')
+        bio = await bio_el.inner_text() if bio_el else ""
+        cache[username] = any(term in bio for term in _BIO_BUSINESS_TERMS)
+    except Exception:
+        cache[username] = False
+    return cache[username]
+
+
 def _clean_display_name(name: str) -> str:
     for sep in ["｜", "|", "＠", "@"]:
         if sep in name:
@@ -331,6 +352,15 @@ async def main() -> None:
             except Exception as e:
                 print(f"  ERROR [auto @{username}]: {e}", file=sys.stderr)
 
+        # ユーザーbioでビジネス系アカウントチェック
+        bio_cache: dict[str, bool] = {}
+        unique_users = list({t["username"] for t in all_tweets})
+        print(f"\nbioチェック: {len(unique_users)} アカウント")
+        for username in unique_users:
+            is_biz = await check_bio_is_business(page, username, bio_cache)
+            print(f"  [bio] @{username}: {'✓' if is_biz else '✗'}")
+            await asyncio.sleep(random.uniform(1, 2))
+
         # クッキーを保存してから閉じる
         await context.storage_state(path=str(cookies_path))
         await browser.close()
@@ -354,6 +384,10 @@ async def main() -> None:
         replied_urls = get_replied_tweet_urls(slack_client, slack_channel, slack_thread_ts)
     unique = [t for t in unique if t["tweet_url"] not in replied_urls]
     print(f"  実行済み除外後: {len(unique)} 件")
+
+    # ビジネス系アカウントのみ通す
+    unique = [t for t in unique if bio_cache.get(t["username"], False)]
+    print(f"  ビジネスアカウントフィルタ後: {len(unique)} 件")
 
     # AIイラスト・美少女系を除外（ハッシュタグ含む）
     _EXCLUSION_TERMS = {
@@ -379,8 +413,8 @@ async def main() -> None:
     ]
     print(f"  挨拶フィルタ後: {len(filtered)} 件")
 
-    # 営業・エンジニア職を優先、次に投稿日時の新しい順
-    _PRIORITY_TERMS = {"営業", "エンジニア", "SE", "営業職", "エンジニア職", "セールス", "sales"}
+    # ビジネス系ワードが本文に含まれるツイートを優先、次に投稿日時の新しい順
+    _PRIORITY_TERMS = _BIO_BUSINESS_TERMS | {"SE", "営業職", "エンジニア職", "sales"}
 
     def _priority_score(t: dict) -> int:
         haystack = t.get("text", "") + t.get("display_name", "")
