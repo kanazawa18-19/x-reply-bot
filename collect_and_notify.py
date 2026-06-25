@@ -319,6 +319,18 @@ async def main() -> None:
             except Exception as e:
                 print(f"  ERROR [{keyword}]: {e}", file=sys.stderr)
 
+        # 特定ユーザーのおはようツイートを個別検索（search_filterをバイパス）
+        auto_reply_direct: list[dict] = []
+        for username in auto_reply_users:
+            try:
+                user_tweets = await search_tweets(page, f"from:{username} おはよう", 3, "")
+                today = [t for t in user_tweets if is_today_jst(t.get("created_at", ""))]
+                auto_reply_direct.extend(today)
+                print(f"  [auto] @{username}: {len(today)} 件")
+                await asyncio.sleep(random.uniform(3, 5))
+            except Exception as e:
+                print(f"  ERROR [auto @{username}]: {e}", file=sys.stderr)
+
         # クッキーを保存してから閉じる
         await context.storage_state(path=str(cookies_path))
         await browser.close()
@@ -376,10 +388,10 @@ async def main() -> None:
 
     filtered.sort(key=lambda t: (_priority_score(t), t.get("created_at", "")), reverse=True)
 
-    # 自動リプライ対象と手動承認対象を分離（自動リプライは当日分のみ）
+    # 自動リプライ（特定ユーザー個別検索分）: 実行済み除外
     auto_targets = [
-        t for t in filtered
-        if t["username"] in auto_reply_users and is_today_jst(t.get("created_at", ""))
+        t for t in auto_reply_direct
+        if t["tweet_url"] not in replied_urls and t["username"] in auto_reply_users
     ]
     manual_targets = [t for t in filtered if t["username"] not in auto_reply_users]
 
